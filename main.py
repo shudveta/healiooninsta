@@ -138,6 +138,11 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
                 "timestamp": time.time()
             }
             self.wfile.write(json.dumps(status).encode())
+        elif self.path == '/ping':
+            self.send_response(200)
+            self.send_header('Content-type', 'text/plain')
+            self.end_headers()
+            self.wfile.write(b'pong')
         else:
             self.send_response(404)
             self.end_headers()
