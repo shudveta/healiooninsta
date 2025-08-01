@@ -14,6 +14,7 @@ INSTA_PASSWORD = "@Dhruvi&Raghav2006"
 
 # Initialize
 cl = Client()
+cl.load_settings("session.json")
 cl.login(INSTA_USERNAME, INSTA_PASSWORD)
 print(f"✅ Logged in as {INSTA_USERNAME}")
 
