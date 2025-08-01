@@ -15,8 +15,13 @@ INSTA_PASSWORD = "@Dhruvi&Raghav2006"
 # Initialize
 cl = Client()
 cl.load_settings("session.json")
-cl.login(INSTA_USERNAME, INSTA_PASSWORD)
 print(f"✅ Logged in as {INSTA_USERNAME}")
+
+try:
+    cl.get_timeline_feed()  # Light call to check if session is valid
+except Exception:
+    print("Session expired or invalid, please re-login.")
+    raise
 
 # Track messages
 last_message_ids = {}
