@@ -1,27 +1,60 @@
 import time
 import requests
-from fastapi import FastAPI
+import os
+import json
 from instagrapi import Client
-from threading import Lock
-
-app = FastAPI()
-mutex = Lock()
 
 # Configs
 GEMINI_API_URL = "https://yabbering-jenifer-shudveta-it-solutions-38e150de.koyeb.app/dr_healio_chat"
-INSTA_USERNAME = "ipdnow"
-INSTA_PASSWORD = "@Dhruvi&Raghav2006"
+INSTA_USERNAME = os.getenv("INSTA_USERNAME", "ipdnow")
+INSTA_PASSWORD = os.getenv("INSTA_PASSWORD", "@Dhruvi&Raghav2006")
+SESSION_FILE = "session.json"
 
 # Initialize
 cl = Client()
-cl.load_settings("session.json")
-print(f"✅ Logged in as {INSTA_USERNAME}")
 
-try:
-    cl.get_timeline_feed()  # Light call to check if session is valid
-except Exception:
-    print("Session expired or invalid, please re-login.")
-    raise
+def load_session():
+    """Load session from file if it exists"""
+    if os.path.exists(SESSION_FILE):
+        try:
+            cl.load_settings(SESSION_FILE)
+            print(f"✅ Session loaded from {SESSION_FILE}")
+            return True
+        except Exception as e:
+            print(f"⚠️ Error loading session: {e}")
+            return False
+    return False
+
+def save_session():
+    """Save current session to file"""
+    try:
+        cl.dump_settings(SESSION_FILE)
+        print(f"✅ Session saved to {SESSION_FILE}")
+    except Exception as e:
+        print(f"⚠️ Error saving session: {e}")
+
+def login_with_fallback():
+    """Try to load session, fallback to username/password login"""
+    # First try to load existing session
+    if load_session():
+        try:
+            # Verify session is still valid
+            cl.get_timeline_feed()
+            print(f"✅ Session is valid, logged in as {INSTA_USERNAME}")
+            return True
+        except Exception as e:
+            print(f"⚠️ Session expired: {e}")
+    
+    # Fallback to username/password login
+    try:
+        print(f"🔄 Logging in with username/password...")
+        cl.login(INSTA_USERNAME, INSTA_PASSWORD)
+        print(f"✅ Logged in as {INSTA_USERNAME}")
+        save_session()
+        return True
+    except Exception as e:
+        print(f"❌ Login failed: {e}")
+        return False
 
 # Track messages
 last_message_ids = {}
@@ -68,44 +101,62 @@ def get_reply_from_endpoint(user_id, user_input):
         print(f"❌ Unexpected error in get_reply_from_endpoint: {e}")
         return "⚠️ Something went wrong. Please try again."
 
-@app.get("/ping")
-def check_and_reply():
-    with mutex:
+def main():
+    # Login with session fallback
+    if not login_with_fallback():
+        print("❌ Failed to login. Exiting...")
+        return
+    
+    print("🤖 Bot started. Monitoring messages...")
+    
+    while True:
         try:
             inbox = cl.direct_threads()
             for thread in inbox:
                 try:
+                    # Skip threads with no users
                     if not thread.users or len(thread.users) == 0:
                         continue
-                    
+                        
+                    # Get basic thread info
                     thread_id = thread.id
                     
+                    # Get the last message
                     if not thread.messages or len(thread.messages) == 0:
                         continue
-                    
+                        
                     msg = thread.messages[0]
+                    
+                    # Get the bot's user ID for comparison
                     bot_user_id = cl.user_id
                     
+                    # Skip messages from the bot itself - simplified check
                     if str(msg.user_id) == str(bot_user_id):
                         continue
                     
+                    # Avoid responding to messages already replied
                     if msg.id == last_message_ids.get(thread_id):
                         continue
                     last_message_ids[thread_id] = msg.id
 
+                    # Skip if it's a system event or story reply or empty message
                     if not msg.text or not msg.text.strip():
                         continue
 
+                    # Find the user who sent the message (simplified)
                     sender_username = "Unknown"
                     user_id = None
                     
+                    # Try to get user from thread participants
                     if thread.users:
+                        # For 1-on-1 chats, get the other user (not the bot)
                         for user in thread.users:
                             if str(user.pk) != str(bot_user_id):
                                 user_id = user.pk
                                 sender_username = user.username
                                 break
                     
+                    # If we still don't have a user_id, use the message sender
                     if not user_id:
                         user_id = msg.user_id
                     
@@ -127,9 +178,17 @@ def check_and_reply():
                     print(f"❌ Error processing thread {thread.id if hasattr(thread, 'id') else 'unknown'}: {e}")
                     continue
                     
-            return {"status": "success", "message": "Ping processed"}
+            time.sleep(10)
 
+        except KeyboardInterrupt:
+            print("\n🛑 Bot stopped.")
+            break
         except Exception as e:
             print(f"❌ General Error: {e}")
             print(f"❌ Error type: {type(e).__name__}")
-            return {"status": "error", "details": str(e)}
+            # Save session before continuing
+            save_session()
+            time.sleep(10)
+
+if __name__ == "__main__":
+    main()
