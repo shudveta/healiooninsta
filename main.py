@@ -2,6 +2,8 @@ import time
 import requests
 import os
 import json
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from instagrapi import Client
 
 # Configs
@@ -48,12 +50,33 @@ def login_with_fallback():
     # Fallback to username/password login
     try:
         print(f"🔄 Logging in with username/password...")
-        cl.login(INSTA_USERNAME, INSTA_PASSWORD)
-        print(f"✅ Logged in as {INSTA_USERNAME}")
-        save_session()
-        return True
+        
+        # Add delay and user agent for better success rate
+        cl.delay_range = [1, 3]
+        cl.set_user_agent("Mozilla/5.0 (iPhone; CPU iPhone OS 15_5 like Mac OS X) AppleWebKit/605.1.15")
+        
+        # Try login with timeout
+        import signal
+        def timeout_handler(signum, frame):
+            raise TimeoutError("Login timeout")
+        
+        signal.signal(signal.SIGALRM, timeout_handler)
+        signal.alarm(60)  # 60 second timeout
+        
+        try:
+            cl.login(INSTA_USERNAME, INSTA_PASSWORD)
+            signal.alarm(0)  # Cancel timeout
+            print(f"✅ Logged in as {INSTA_USERNAME}")
+            save_session()
+            return True
+        except TimeoutError:
+            signal.alarm(0)
+            print(f"❌ Login timeout - Instagram might be requiring verification")
+            return False
+            
     except Exception as e:
         print(f"❌ Login failed: {e}")
+        print(f"❌ Error details: {str(e)}")
         return False
 
 # Track messages
@@ -101,7 +124,39 @@ def get_reply_from_endpoint(user_id, user_input):
         print(f"❌ Unexpected error in get_reply_from_endpoint: {e}")
         return "⚠️ Something went wrong. Please try again."
 
+# Health check server for Koyeb
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == '/health':
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            status = {
+                "status": "healthy",
+                "bot": "running",
+                "logged_in": bool(cl and hasattr(cl, 'user_id') and cl.user_id),
+                "timestamp": time.time()
+            }
+            self.wfile.write(json.dumps(status).encode())
+        else:
+            self.send_response(404)
+            self.end_headers()
+    
+    def log_message(self, format, *args):
+        # Suppress HTTP server logs
+        pass
+
+def start_health_server():
+    """Start health check server in background thread"""
+    server = HTTPServer(('0.0.0.0', 8000), HealthCheckHandler)
+    print("🏥 Health check server started on port 8000")
+    server.serve_forever()
+
 def main():
+    # Start health check server in background
+    health_thread = threading.Thread(target=start_health_server, daemon=True)
+    health_thread.start()
+    
     # Login with session fallback
     if not login_with_fallback():
         print("❌ Failed to login. Exiting...")
