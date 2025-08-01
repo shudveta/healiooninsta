@@ -169,9 +169,17 @@ def main():
     
     print("🤖 Bot started. Monitoring messages...")
     
+    # Enhanced error handling and retry logic
+    consecutive_errors = 0
+    max_consecutive_errors = 5
+    base_sleep_time = 10
+    
     while True:
         try:
+            print("🔄 Checking for new messages...")
             inbox = cl.direct_threads()
+            consecutive_errors = 0  # Reset error counter on success
+            
             for thread in inbox:
                 try:
                     # Skip threads with no users
@@ -231,24 +239,75 @@ def main():
                     try:
                         cl.direct_send(reply, [user_id])
                         print(f"✅ Reply sent successfully to @{sender_username}")
+                        # Add delay after sending to avoid rate limiting
+                        time.sleep(2)
                     except Exception as e:
                         print(f"❌ Error sending reply: {e}")
                         
                 except Exception as e:
                     print(f"❌ Error processing thread {thread.id if hasattr(thread, 'id') else 'unknown'}: {e}")
                     continue
-                    
-            time.sleep(10)
+            
+            # Normal sleep between checks
+            print("✅ Message check completed. Waiting...")
+            time.sleep(base_sleep_time)
 
         except KeyboardInterrupt:
             print("\n🛑 Bot stopped.")
             break
         except Exception as e:
-            print(f"❌ General Error: {e}")
-            print(f"❌ Error type: {type(e).__name__}")
-            # Save session before continuing
-            save_session()
-            time.sleep(10)
+            consecutive_errors += 1
+            error_type = type(e).__name__
+            
+            print(f"❌ General Error #{consecutive_errors}: {e}")
+            print(f"❌ Error type: {error_type}")
+            
+            # Handle specific Instagram API errors
+            if "500 error responses" in str(e) or "RetryError" in error_type:
+                print("🔧 Instagram API is experiencing issues. Implementing backoff...")
+                sleep_time = min(base_sleep_time * (2 ** consecutive_errors), 300)  # Max 5 minutes
+                print(f"⏳ Waiting {sleep_time} seconds before retry...")
+            
+            elif "HTTPSConnectionPool" in str(e):
+                print("🌐 Network connectivity issue detected...")
+                sleep_time = min(30 * consecutive_errors, 180)  # Max 3 minutes
+                print(f"⏳ Network retry in {sleep_time} seconds...")
+            
+            elif "rate limit" in str(e).lower():
+                print("⚠️ Rate limit detected. Cooling down...")
+                sleep_time = 60 * consecutive_errors  # Progressive backoff
+                print(f"⏳ Rate limit cooldown: {sleep_time} seconds...")
+            
+            else:
+                # Generic error handling
+                sleep_time = base_sleep_time * consecutive_errors
+                print(f"⏳ Generic error backoff: {sleep_time} seconds...")
+            
+            # Check if we should attempt to re-login
+            if consecutive_errors >= 3:
+                print("🔄 Multiple errors detected. Attempting to refresh session...")
+                try:
+                    save_session()  # Save current session
+                    # Try to verify session is still valid
+                    cl.get_timeline_feed()
+                    print("✅ Session still valid")
+                except Exception as session_error:
+                    print(f"⚠️ Session verification failed: {session_error}")
+                    print("🔄 Attempting to re-login...")
+                    if login_with_fallback():
+                        print("✅ Re-login successful")
+                        consecutive_errors = 0  # Reset counter on successful login
+                    else:
+                        print("❌ Re-login failed")
+            
+            # Exit if too many consecutive errors
+            if consecutive_errors >= max_consecutive_errors:
+                print(f"❌ Too many consecutive errors ({consecutive_errors}). Exiting to prevent issues...")
+                print("💡 The bot will restart automatically if configured properly in Koyeb")
+                break
+            
+            # Sleep with backoff
+            time.sleep(sleep_time)
 
 if __name__ == "__main__":
     main()
