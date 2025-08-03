@@ -8,8 +8,8 @@ from instagrapi import Client
 
 # Configs
 GEMINI_API_URL = "https://yabbering-jenifer-shudveta-it-solutions-38e150de.koyeb.app/dr_healio_chat"
-INSTA_USERNAME = os.getenv("INSTA_USERNAME", "ipdnow")
-INSTA_PASSWORD = os.getenv("INSTA_PASSWORD", "@Dhruvi&Raghav2006")
+INSTA_USERNAME = os.getenv("INSTA_USERNAME")
+INSTA_PASSWORD = os.getenv("INSTA_PASSWORD")
 SESSION_FILE = "session.json"
 
 # Initialize
@@ -311,3 +311,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
